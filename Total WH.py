@@ -6,7 +6,7 @@ from io import BytesIO
 # --- 1. 页面配置 ---
 st.set_page_config(page_title="MDC Warehouse Monitor", layout="wide")
 
-# --- 2. 语言字典 (添加葡语支持) ---
+# --- 2. 语言字典 ---
 lang_dict = {
     "CN": {
         "title": "MDC 全仓库总体库容监控中心",
@@ -22,11 +22,13 @@ lang_dict = {
         "loc_empty": "空闲库位",
         "loc_util": "库位利用率",
         "export_btn": "📥 导出全库空位 (Excel)",
-        "empty_sheet": "空库位清单",
         "unit": "个",
         "free": "空闲",
         "vol_tip": "容积",
-        "status_tip": "状态"
+        "status_tip": "状态",
+        "east": "东半段",
+        "mid": "中段",
+        "west": "西半段"
     },
     "PT": {
         "title": "Centro de Monitoramento de Armazém MDC",
@@ -42,15 +44,17 @@ lang_dict = {
         "loc_empty": "Locais Livres",
         "loc_util": "Taxa de Utilização",
         "export_btn": "📥 Exportar Locais Livres (Excel)",
-        "empty_sheet": "Lista_de_Locais_Livres",
         "unit": "un",
         "free": "Livre",
         "vol_tip": "Volume",
-        "status_tip": "Estado"
+        "status_tip": "Estado",
+        "east": "Zona Este",
+        "mid": "Zona Central",
+        "west": "Zona Oeste"
     }
 }
 
-# --- 3. 侧边栏语言切换器 ---
+# --- 3. 语言切换 ---
 st.sidebar.markdown("### 🌐 Idioma / 语言")
 lang_choice = st.sidebar.radio("", ["Português", "中文"], horizontal=True)
 L = lang_dict["PT"] if lang_choice == "Português" else lang_dict["CN"]
@@ -60,27 +64,32 @@ st.markdown(f"""
     <style>
     .total-card {{
         background: linear-gradient(135deg, #3A1C71 0%, #D76D77 50%, #FFAF7B 100%);
-        padding: 25px; border-radius: 15px; color: white; text-align: center;
-        box-shadow: 0 10px 20px rgba(0,0,0,0.2); margin-bottom: 20px;
+        padding: 20px; border-radius: 15px; color: white; text-align: center;
+        box-shadow: 0 10px 20px rgba(0,0,0,0.1); margin-bottom: 20px;
     }}
     .wh-card {{
         background: linear-gradient(135deg, #1D976C 0%, #93F9B9 100%);
         padding: 15px; border-radius: 12px; color: #1a1a1a; text-align: center;
-        box-shadow: 0 4px 15px rgba(0,0,0,0.1);
+        box-shadow: 0 4px 15px rgba(0,0,0,0.05);
     }}
     .sidebar-stat {{
-        background-color: #ffffff; padding: 15px; border-radius: 10px;
-        border-left: 5px solid #1D976C; margin-bottom: 10px; box-shadow: 0 2px 5px rgba(0,0,0,0.05);
+        background-color: #ffffff; padding: 12px; border-radius: 10px;
+        border-left: 5px solid #1D976C; margin-bottom: 8px; box-shadow: 0 2px 5px rgba(0,0,0,0.05);
+    }}
+    .section-header {{
+        background-color: #e9ecef; padding: 5px 15px; border-radius: 5px;
+        color: #495057; font-weight: bold; margin-top: 20px; border-left: 5px solid #3A1C71;
     }}
     </style>
     """, unsafe_allow_html=True)
 
-# --- 5. 数据加载引擎 ---
+# --- 5. 数据加载 ---
 @st.cache_data(ttl=600)
-def load_optimized_data():
+def load_data():
     file_name = "SGF.csv" 
     if not os.path.exists(file_name): return None, None
     try:
+        # 严格引用：0:SKU, 6:库位, 9:数量, 11-13:尺寸, 14:状态
         df_raw = pd.read_csv(file_name, usecols=[0, 6, 9, 11, 12, 13, 14], low_memory=False)
         df_raw.columns = ['SKU', 'RawLoc', 'Qty', 'L', 'W', 'H', 'Status']
         df = df_raw[df_raw['RawLoc'].str.len() >= 6].copy()
@@ -100,15 +109,14 @@ def load_optimized_data():
         st.error(f"Error: {e}")
         return None, None
 
-loc_map, raw_df = load_optimized_data()
+loc_map, _ = load_data()
 
 # --- 6. 渲染引擎 ---
 def render_shelf(cols, title, split_size, wh):
     if not cols: return
-    st.markdown(f"#### 📍 {title}")
+    st.markdown(f'<div class="section-header">📍 {title}</div>', unsafe_allow_html=True)
     levels = ["50", "40", "30", "20", "10", "00"] if wh == 'A' else ["40", "30", "20", "10", "00"]
     
-    # 自动生成货架排列
     dseq = ["PILLAR"]
     for i, c in enumerate(cols):
         dseq.append(c)
@@ -119,52 +127,50 @@ def render_shelf(cols, title, split_size, wh):
     for i, item in enumerate(dseq):
         with st_cols[i]:
             if item == "PILLAR":
-                st.markdown('<div style="border-left:2px dashed #999;height:450px;margin-left:50%;opacity:0.6;"></div>', unsafe_allow_html=True)
+                st.markdown('<div style="border-left:2px dashed #bbb;height:380px;margin:0 auto;width:1px;opacity:0.5;"></div>', unsafe_allow_html=True)
             else:
                 for lvl in levels:
                     loc_id = f"{sel_aisle}-{item}-{lvl}"
                     data = loc_map.get(loc_id)
                     if not data:
                         st.button("➖", key=loc_id, disabled=True, use_container_width=True)
-                    elif data['Status'] in ['柱子', '消防栓', 'Pillar', 'Pilar']:
+                    elif data['Status'] in ['柱子', '消防栓', 'Pilar']:
                         st.button("🚫", key=loc_id, help=data['Status'], disabled=True, use_container_width=True)
                     elif len(data['Items']) > 0:
                         st.button(f"🟦{lvl}", key=loc_id, help="\n".join(data['Items']), use_container_width=True)
                     else:
                         st.button(f"🟩{lvl}", key=loc_id, help=f"{L['vol_tip']}: {data['Vol']:.3f}m³\n{L['status_tip']}: {L['free']}", use_container_width=True)
-                st.markdown(f'<div style="text-align:center;font-weight:bold;font-size:12px;padding-top:8px;">{item}</div>', unsafe_allow_html=True)
+                st.markdown(f'<div style="text-align:center;font-weight:bold;font-size:11px;color:#666;">{item}</div>', unsafe_allow_html=True)
 
-# --- 7. 主界面渲染 ---
+# --- 7. 主界面 ---
 if loc_map:
     all_locs = list(loc_map.values())
     unique_av = [i for i in all_locs if i['Status'] == '可用']
     
-    # 顶部数据
     gv = sum(i['Vol'] for i in unique_av)
     uv = sum(i['Vol'] for i in unique_av if len(i['Items']) > 0)
     ratio = (uv / gv * 100) if gv > 0 else 0
 
     st.markdown(f'# {L["title"]}')
     c1, c2 = st.columns([1, 1.2])
-    with c1: st.markdown(f'<div class="total-card"><div style="font-size:1.2rem;">{L["total_ratio"]}</div><div style="font-size:3.5rem;font-weight:800;">{ratio:.1f}%</div></div>', unsafe_allow_html=True)
-    with c2: st.markdown(f'<div class="total-card"><div style="font-size:1.2rem;">{L["total_vol"]}</div><div style="font-size:2.2rem;font-weight:700;margin-top:10px;">{uv:.1f} / {gv:.1f}</div><div style="font-size:0.9rem;">{L["used_total"]}</div></div>', unsafe_allow_html=True)
+    with c1: st.markdown(f'<div class="total-card"><div style="font-size:1rem;">{L["total_ratio"]}</div><div style="font-size:3rem;font-weight:800;">{ratio:.1f}%</div></div>', unsafe_allow_html=True)
+    with c2: st.markdown(f'<div class="total-card"><div style="font-size:1rem;">{L["total_vol"]}</div><div style="font-size:2rem;font-weight:700;margin-top:5px;">{uv:.1f} / {gv:.1f}</div><div style="font-size:0.8rem;">{L["used_total"]}</div></div>', unsafe_allow_html=True)
 
-    # 仓库详情
+    # 仓库详情卡片
     wh_list = ['A', 'B', 'C', 'D', 'E']
     h_cols = st.columns(5)
     for i, wh in enumerate(wh_list):
         wh_d = [j for j in unique_av if j['WH'] == wh]
         tv_w = sum(j['Vol'] for j in wh_d); uv_w = sum(j['Vol'] for j in wh_d if len(j['Items']) > 0)
         r_w = (uv_w / tv_w * 100) if tv_w > 0 else 0
-        with h_cols[i]: st.markdown(f'<div class="wh-card"><div style="font-weight:800;">Armazém {wh}</div><div style="font-size:1.8rem;font-weight:700;color:#0d47a1;">{r_w:.1f}%</div><div style="font-size:0.8rem;">{uv_w:.1f} / {tv_w:.1f} m³</div></div>', unsafe_allow_html=True)
+        with h_cols[i]: st.markdown(f'<div class="wh-card"><div style="font-weight:bold;">{wh}</div><div style="font-size:1.5rem;font-weight:700;color:#0d47a1;">{r_w:.1f}%</div></div>', unsafe_allow_html=True)
 
     st.divider()
 
-    # --- 8. 侧边栏控制与统计 ---
+    # --- 8. 侧边栏 ---
     st.sidebar.header(L["sidebar_ctrl"])
     sel_wh = st.sidebar.selectbox(L["sel_wh"], wh_list)
     
-    # 动态统计
     curr_locs = [i for i in unique_av if i['WH'] == sel_wh]
     t_cnt = len(curr_locs); u_cnt = len([i for i in curr_locs if len(i['Items']) > 0])
     e_cnt = t_cnt - u_cnt; util = (u_cnt / t_cnt * 100) if t_cnt > 0 else 0
@@ -176,24 +182,30 @@ if loc_map:
         <div class="sidebar-stat" style="border-left-color:#FFAF7B"><small>{L['loc_util']}</small><br><b>{util:.1f}%</b></div>
     """, unsafe_allow_html=True)
 
-    st.sidebar.markdown("---")
     aisles = sorted(list(set(i['Aisle'] for i in all_locs if i['WH'] == sel_wh)))
     sel_aisle = st.sidebar.selectbox(L["sel_aisle"], aisles)
 
-    # 导出
-    empty_data = [{'Local': k, 'Armazém': v['WH']} for k, v in loc_map.items() if v['Status'] == '可用' and len(v['Items']) == 0]
+    # 导出功能
+    empty_data = [{'Loc': k, 'WH': v['WH']} for k, v in loc_map.items() if v['Status'] == '可用' and len(v['Items']) == 0]
     if empty_data:
-        out = BytesIO()
+        out = BytesIO(); 
         with pd.ExcelWriter(out, engine='xlsxwriter') as w: pd.DataFrame(empty_data).to_excel(w, index=False)
-        st.sidebar.download_button(L["export_btn"], out.getvalue(), "MDC_Locais_Livres.xlsx")
+        st.sidebar.download_button(L["export_btn"], out.getvalue(), "MDC_Free_Locs.xlsx", use_container_width=True)
 
-    # --- 9. 货架显示 ---
+    # --- 9. 货架显示 (修正分段逻辑) ---
     current_cols = sorted(list(set(i['Col'] for i in all_locs if i['Aisle'] == sel_aisle)))
-    if sel_wh == 'A':
-        render_shelf([c for c in current_cols if int(c) <= 24], "Zona Este (01-24)", 3, 'A')
-        render_shelf([c for c in current_cols if 25 <= int(c) <= 48], "Zona Central (25-48)", 3, 'A')
-        render_shelf([c for c in current_cols if 49 <= int(c) <= 72], "Zona Oeste (49-72)", 3, 'A')
+    
+    if sel_wh in ['A', 'B']:
+        # A和B库：三段式 (01-24, 25-48, 49+)
+        render_shelf([c for c in current_cols if int(c) <= 24], f"{L['east']} (01-24)", 3, sel_wh)
+        render_shelf([c for c in current_cols if 25 <= int(c) <= 48], f"{L['mid']} (25-48)", 3, sel_wh)
+        render_shelf([c for c in current_cols if int(c) > 48], f"{L['west']} (49+)", 3, sel_wh)
+    elif sel_wh in ['C', 'D', 'E']:
+        # C, D, E库：两段式 (01-22, 23+)
+        render_shelf([c for c in current_cols if int(c) <= 22], f"{L['east']} (01-22)", 2, sel_wh)
+        render_shelf([c for c in current_cols if int(c) > 22], f"{L['west']} (23+)", 2, sel_wh)
     else:
         render_shelf(current_cols, f"Corredor {sel_aisle}", 2, sel_wh)
+
 else:
-    st.warning("A carregar dados... / 正在加载数据...")
+    st.warning("⚠️ SGF.csv 缺失或格式错误。")
