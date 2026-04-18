@@ -3,209 +3,250 @@ import pandas as pd
 import os
 from io import BytesIO
 
-# --- 1. 页面配置 ---
-st.set_page_config(page_title="MDC Warehouse Monitor", layout="wide")
+# --- 1. 页面配置与 UI 样式 ---
+st.set_page_config(page_title="MDC 智能仓储监控中心", layout="wide")
 
-# --- 2. 语言字典 ---
-lang_dict = {
-    "CN": {
-        "title": "MDC 全仓库总体库容监控中心",
-        "total_ratio": "全库总占比",
-        "total_vol": "容积统计 (m³)",
-        "used_total": "已用 / 总可用",
-        "sidebar_ctrl": "⚙️ 控制面板",
-        "sel_wh": "📂 选择库房",
-        "sel_aisle": "🛣️ 选择货道",
-        "stat_title": "📊 实时统计",
-        "loc_total": "可用库位总数",
-        "loc_used": "已使用库位",
-        "loc_empty": "空闲库位",
-        "loc_util": "库位利用率",
-        "export_btn": "📥 导出全库空位 (Excel)",
-        "unit": "个",
-        "free": "空闲",
-        "vol_tip": "容积",
-        "status_tip": "状态",
-        "east": "东半段",
-        "mid": "中段",
-        "west": "西半段"
-    },
-    "PT": {
-        "title": "Centro de Monitoramento de Armazém MDC",
-        "total_ratio": "Ocupação Total",
-        "total_vol": "Estatística de Volume (m³)",
-        "used_total": "Usado / Total Disp.",
-        "sidebar_ctrl": "⚙️ Painel de Controlo",
-        "sel_wh": "📂 Selecionar Armazém",
-        "sel_aisle": "🛣️ Selecionar Corredor",
-        "stat_title": "📊 Estatísticas em Tempo Real",
-        "loc_total": "Total de Locais Disp.",
-        "loc_used": "Locais Ocupados",
-        "loc_empty": "Locais Livres",
-        "loc_util": "Taxa de Utilização",
-        "export_btn": "📥 Exportar Locais Livres (Excel)",
-        "unit": "un",
-        "free": "Livre",
-        "vol_tip": "Volume",
-        "status_tip": "Estado",
-        "east": "Zona Este",
-        "mid": "Zona Central",
-        "west": "Zona Oeste"
-    }
-}
-
-# --- 3. 语言切换 ---
-st.sidebar.markdown("### 🌐 Idioma / 语言")
-lang_choice = st.sidebar.radio("", ["Português", "中文"], horizontal=True)
-L = lang_dict["PT"] if lang_choice == "Português" else lang_dict["CN"]
-
-# --- 4. 样式配置 ---
-st.markdown(f"""
+st.markdown("""
     <style>
-    .total-card {{
-        background: linear-gradient(135deg, #3A1C71 0%, #D76D77 50%, #FFAF7B 100%);
-        padding: 20px; border-radius: 15px; color: white; text-align: center;
-        box-shadow: 0 10px 20px rgba(0,0,0,0.1); margin-bottom: 20px;
-    }}
-    .wh-card {{
-        background: linear-gradient(135deg, #1D976C 0%, #93F9B9 100%);
-        padding: 15px; border-radius: 12px; color: #1a1a1a; text-align: center;
-        box-shadow: 0 4px 15px rgba(0,0,0,0.05);
-    }}
-    .sidebar-stat {{
-        background-color: #ffffff; padding: 12px; border-radius: 10px;
-        border-left: 5px solid #1D976C; margin-bottom: 8px; box-shadow: 0 2px 5px rgba(0,0,0,0.05);
-    }}
-    .section-header {{
-        background-color: #e9ecef; padding: 5px 15px; border-radius: 5px;
-        color: #495057; font-weight: bold; margin-top: 20px; border-left: 5px solid #3A1C71;
-    }}
+    .main { background-color: #f8f9fa; }
+    .total-card {
+        background: linear-gradient(135deg, #1e3c72 0%, #2a5298 100%);
+        padding: 15px; border-radius: 10px; color: white; text-align: center;
+        box-shadow: 0 4px 10px rgba(0,0,0,0.1); margin-bottom: 20px;
+    }
+    .wh-stat-card {
+        background: white; padding: 10px; border-radius: 8px;
+        border: 1px solid #e0e0e0; text-align: center;
+        box-shadow: 0 2px 5px rgba(0,0,0,0.05);
+    }
+    .wh-stat-title { font-weight: bold; color: #1e3c72; font-size: 16px; margin-bottom: 5px; }
+    .wh-stat-val { color: #2ecc71; font-weight: bold; font-size: 18px; }
+
+    /* 图例说明样式 */
+    .legend-container {
+        display: flex; flex-wrap: wrap; gap: 20px; justify-content: center;
+        background: white; padding: 12px; border-radius: 8px;
+        border: 1px solid #eee; margin-bottom: 20px; font-size: 13px;
+    }
+    .legend-item { display: flex; align-items: center; gap: 6px; }
+
+    /* 货架结构与横梁/立柱 */
+    .shelf-container {
+        display: flex; flex-wrap: nowrap; justify-content: flex-start;
+        gap: 0px; padding: 15px; overflow-x: auto; background: white;
+        border-radius: 10px; border: 1px solid #eee; margin-bottom: 30px;
+    }
+    .bay-unit { display: flex; flex-direction: row; align-items: flex-start; }
+    .bin-column { display: flex; flex-direction: column; align-items: center; width: 42px; flex-shrink: 0; }
+    
+    .bin-box {
+        width: 36px; height: 30px; margin: 0px 0;
+        display: flex; align-items: center; justify-content: center;
+        border-radius: 2px; font-size: 10px; font-weight: bold;
+        border: 1px solid #eee; z-index: 2; background-color: white;
+    }
+    
+    /* 橙色横梁样式 */
+    .orange-beam-row {
+        width: 100%; height: 4px; background-color: #ff9800; 
+        margin: 2px 0; box-shadow: 0 1px 2px rgba(0,0,0,0.1); z-index: 5;
+    }
+    
+    /* 科技蓝立柱样式 */
+    .pillar-tech-blue {
+        width: 0; height: 210px; border-left: 4px dotted #3498db; 
+        margin: 0 10px; opacity: 0.9; align-self: flex-start; margin-top: 5px;
+    }
+
+    /* 库位状态颜色 */
+    .status-used { background-color: #3498db !important; color: white; border: none; }
+    .status-empty { background-color: #2ecc71 !important; color: white; border: none; }
+    .status-disabled { background-color: #95a5a6 !important; color: white; border: none; }
+    .status-aisle { background-color: #f1c40f !important; color: #333; border: none; }
+    .status-pillar { background-color: #7f8c8d !important; color: white; border: none; }
+
+    .aisle-title { 
+        background: #e9ecef; padding: 5px 15px; border-radius: 5px; 
+        font-weight: bold; color: #495057; margin-top: 15px; margin-bottom: 8px; display: inline-block;
+    }
     </style>
     """, unsafe_allow_html=True)
 
-# --- 5. 数据加载 ---
-@st.cache_data(ttl=600)
+# --- 2. 数据处理引擎 ---
+@st.cache_data(ttl=60)
 def load_data():
-    file_name = "SGF.csv" 
-    if not os.path.exists(file_name): return None, None
+    if not os.path.exists("SGF.csv"):
+        return None, None
     try:
-        # 严格引用：0:SKU, 6:库位, 9:数量, 11-13:尺寸, 14:状态
-        df_raw = pd.read_csv(file_name, usecols=[0, 6, 9, 11, 12, 13, 14], low_memory=False)
-        df_raw.columns = ['SKU', 'RawLoc', 'Qty', 'L', 'W', 'H', 'Status']
-        df = df_raw[df_raw['RawLoc'].str.len() >= 6].copy()
-        df['Qty'] = pd.to_numeric(df['Qty'], errors='coerce').fillna(0)
-        df['Vol_m3'] = (pd.to_numeric(df['L'], errors='coerce').fillna(0) * pd.to_numeric(df['W'], errors='coerce').fillna(0) * pd.to_numeric(df['H'], errors='coerce').fillna(0)) / 1_000_000
+        raw_df = pd.read_csv("SGF.csv", low_memory=False)
+        # 修复 SettingWithCopyWarning：使用 .copy() 创建独立副本
+        df = raw_df.iloc[:, [0, 6, 9, 11, 12, 13, 14]].copy()
         
-        loc_map = {}
-        for _, row in df.iterrows():
-            raw_val = str(row['RawLoc'])
-            loc = f"{raw_val[0:3]}-{raw_val[3:5]}-{raw_val[5:7]}"
-            if loc not in loc_map:
-                loc_map[loc] = {'WH': raw_val[0].upper(), 'Aisle': raw_val[0:3], 'Col': raw_val[3:5], 'Vol': row['Vol_m3'], 'Status': row['Status'], 'Items': []}
-            if row['Qty'] > 0:
-                loc_map[loc]['Items'].append(f"• {row['SKU']}: {int(row['Qty'])}")
-        return loc_map, df
+        df.columns = ['SKU', 'Loc', 'Qty', 'L', 'W', 'H', 'Status']
+        
+        # 数据清洗与转换
+        df['Loc'] = df['Loc'].astype(str).str.strip()
+        df['Status'] = df['Status'].astype(str).str.strip()
+        df['Qty'] = pd.to_numeric(df['Qty'], errors='coerce').fillna(0)
+        
+        for c in ['L','W','H']: 
+            df[c] = pd.to_numeric(df[c], errors='coerce').fillna(0)
+            
+        # 计算库位容积
+        df['Vol'] = (df['L'] * df['W'] * df['H']) / 1000000
+
+        # 筛选出仓库主结构库位 (A-E 库房，非明细行)
+        m_mask = (~df['Loc'].str.contains('-', na=False)) & (df['Loc'].str.startswith(('A','B','C','D','E'))) & (df['L']>0)
+        master = df[m_mask].drop_duplicates('Loc')
+        
+        l_map, stats = {}, {wh: {'t_v':0.0, 'u_v':0.0, 'total_bins':0, 'used_bins':0} for wh in 'ABCDE'}
+        
+        for _, r in master.iterrows():
+            wh = r['Loc'][0].upper()
+            l_map[r['Loc']] = {
+                'Items':[], 'Status':r['Status'], 'Vol':r['Vol'], 'WH':wh, 
+                'Aisle':r['Loc'][0:3], 'Col':r['Loc'][3:5], 'Lvl':r['Loc'][5:7]
+            }
+            if r['Status'] == "可用": 
+                stats[wh]['t_v'] += r['Vol']
+                stats[wh]['total_bins'] += 1
+        
+        # 填充实时库存货物
+        inv = df[df['Qty'] > 0]
+        for _, r in inv.iterrows():
+            if r['Loc'] in l_map: 
+                l_map[r['Loc']]['Items'].append(f"{r['SKU']}:{int(r['Qty'])}")
+        
+        # 统计已占用库位的容积和数量
+        for k, v in l_map.items():
+            if len(v['Items']) > 0 and v['Status'] == "可用": 
+                stats[v['WH']]['u_v'] += v['Vol']
+                stats[v['WH']]['used_bins'] += 1
+                
+        return l_map, stats
     except Exception as e:
-        st.error(f"Error: {e}")
+        st.error(f"数据处理出错: {e}")
         return None, None
 
-loc_map, _ = load_data()
+l_map, wh_stats = load_data()
 
-# --- 6. 渲染引擎 ---
-def render_shelf(cols, title, split_size, wh):
-    if not cols: return
-    st.markdown(f'<div class="section-header">📍 {title}</div>', unsafe_allow_html=True)
-    levels = ["50", "40", "30", "20", "10", "00"] if wh == 'A' else ["40", "30", "20", "10", "00"]
+# --- 3. 页面渲染逻辑 ---
+if l_map:
+    st.markdown('<h2 style="text-align:center; color:#1e3c72;">MDC 仓库实时监控看板</h2>', unsafe_allow_html=True)
     
-    dseq = ["PILLAR"]
-    for i, c in enumerate(cols):
-        dseq.append(c)
-        if (i + 1) % split_size == 0: dseq.append("PILLAR")
-    if dseq[-1] != "PILLAR": dseq.append("PILLAR")
+    # 顶部：全库汇总指标
+    t_all = sum(s['t_v'] for s in wh_stats.values())
+    u_all = sum(s['u_v'] for s in wh_stats.values())
+    r_all = (u_all/t_all*100) if t_all>0 else 0
+    st.markdown(f'<div class="total-card">全库容积利用率: <b>{r_all:.1f}%</b> &nbsp;&nbsp; | &nbsp;&nbsp; 已用: {u_all:.1f} m³ / 总可用: {t_all:.1f} m³</div>', unsafe_allow_html=True)
 
-    st_cols = st.columns(len(dseq))
-    for i, item in enumerate(dseq):
-        with st_cols[i]:
-            if item == "PILLAR":
-                st.markdown('<div style="border-left:2px dashed #bbb;height:380px;margin:0 auto;width:1px;opacity:0.5;"></div>', unsafe_allow_html=True)
-            else:
-                for lvl in levels:
-                    loc_id = f"{sel_aisle}-{item}-{lvl}"
-                    data = loc_map.get(loc_id)
-                    if not data:
-                        st.button("➖", key=loc_id, disabled=True, use_container_width=True)
-                    elif data['Status'] in ['柱子', '消防栓', 'Pilar']:
-                        st.button("🚫", key=loc_id, help=data['Status'], disabled=True, use_container_width=True)
-                    elif len(data['Items']) > 0:
-                        st.button(f"🟦{lvl}", key=loc_id, help="\n".join(data['Items']), use_container_width=True)
-                    else:
-                        st.button(f"🟩{lvl}", key=loc_id, help=f"{L['vol_tip']}: {data['Vol']:.3f}m³\n{L['status_tip']}: {L['free']}", use_container_width=True)
-                st.markdown(f'<div style="text-align:center;font-weight:bold;font-size:11px;color:#666;">{item}</div>', unsafe_allow_html=True)
-
-# --- 7. 主界面 ---
-if loc_map:
-    all_locs = list(loc_map.values())
-    unique_av = [i for i in all_locs if i['Status'] == '可用']
+    # --- 侧边栏功能区 ---
+    st.sidebar.header("⚙️ 监控工具")
+    wh_sel = st.sidebar.selectbox("切换库房视图", ['A','B','C','D','E'])
     
-    gv = sum(i['Vol'] for i in unique_av)
-    uv = sum(i['Vol'] for i in unique_av if len(i['Items']) > 0)
-    ratio = (uv / gv * 100) if gv > 0 else 0
-
-    st.markdown(f'# {L["title"]}')
-    c1, c2 = st.columns([1, 1.2])
-    with c1: st.markdown(f'<div class="total-card"><div style="font-size:1rem;">{L["total_ratio"]}</div><div style="font-size:3rem;font-weight:800;">{ratio:.1f}%</div></div>', unsafe_allow_html=True)
-    with c2: st.markdown(f'<div class="total-card"><div style="font-size:1rem;">{L["total_vol"]}</div><div style="font-size:2rem;font-weight:700;margin-top:5px;">{uv:.1f} / {gv:.1f}</div><div style="font-size:0.8rem;">{L["used_total"]}</div></div>', unsafe_allow_html=True)
-
-    # 仓库详情卡片
-    wh_list = ['A', 'B', 'C', 'D', 'E']
-    h_cols = st.columns(5)
-    for i, wh in enumerate(wh_list):
-        wh_d = [j for j in unique_av if j['WH'] == wh]
-        tv_w = sum(j['Vol'] for j in wh_d); uv_w = sum(j['Vol'] for j in wh_d if len(j['Items']) > 0)
-        r_w = (uv_w / tv_w * 100) if tv_w > 0 else 0
-        with h_cols[i]: st.markdown(f'<div class="wh-card"><div style="font-weight:bold;">{wh}</div><div style="font-size:1.5rem;font-weight:700;color:#0d47a1;">{r_w:.1f}%</div></div>', unsafe_allow_html=True)
-
-    st.divider()
-
-    # --- 8. 侧边栏 ---
-    st.sidebar.header(L["sidebar_ctrl"])
-    sel_wh = st.sidebar.selectbox(L["sel_wh"], wh_list)
+    # 侧边栏：分库实时统计
+    curr_data = wh_stats[wh_sel]
+    st.sidebar.divider()
+    st.sidebar.subheader(f"📊 {wh_sel}库 状态统计")
+    st.sidebar.markdown(f"总可用库位数: **{curr_data['total_bins']}**")
+    st.sidebar.markdown(f"当前已用库位: **{curr_data['used_bins']}**")
+    st.sidebar.markdown(f"当前剩余空闲: **{curr_data['total_bins'] - curr_data['used_bins']}**")
     
-    curr_locs = [i for i in unique_av if i['WH'] == sel_wh]
-    t_cnt = len(curr_locs); u_cnt = len([i for i in curr_locs if len(i['Items']) > 0])
-    e_cnt = t_cnt - u_cnt; util = (u_cnt / t_cnt * 100) if t_cnt > 0 else 0
+    # 侧边栏：空库位导出
+    st.sidebar.divider()
+    st.sidebar.subheader("📥 报表导出")
+    empty_locs = [k for k, v in l_map.items() if v['WH'] == wh_sel and v['Status'] == "可用" and len(v['Items']) == 0]
     
-    st.sidebar.markdown(f"""
-        <div class="sidebar-stat"><small>{L['loc_total']}</small><br><b>{t_cnt} {L['unit']}</b></div>
-        <div class="sidebar-stat" style="border-left-color:#D76D77"><small>{L['loc_used']}</small><br><b>{u_cnt} {L['unit']}</b></div>
-        <div class="sidebar-stat" style="border-left-color:#93F9B9"><small>{L['loc_empty']}</small><br><b>{e_cnt} {L['unit']}</b></div>
-        <div class="sidebar-stat" style="border-left-color:#FFAF7B"><small>{L['loc_util']}</small><br><b>{util:.1f}%</b></div>
+    if empty_locs:
+        csv_df = pd.DataFrame(empty_locs, columns=['Empty_Location_ID'])
+        csv_bytes = csv_df.to_csv(index=False).encode('utf-8-sig')
+        st.sidebar.download_button(
+            label=f"导出 {wh_sel}库 空库位清单",
+            data=csv_bytes,
+            file_name=f"MDC_{wh_sel}_Empty_Locs.csv",
+            mime='text/csv'
+        )
+    else:
+        st.sidebar.warning(f"{wh_sel}库暂时没有空闲库位")
+
+    # 主页：分库容积明细卡片
+    cols_stats = st.columns(5)
+    for i, wh_key in enumerate(['A', 'B', 'C', 'D', 'E']):
+        s = wh_stats[wh_key]
+        r = (s['u_v']/s['t_v']*100) if s['t_v']>0 else 0
+        with cols_stats[i]:
+            st.markdown(f"""
+                <div class="wh-stat-card">
+                    <div class="wh-stat-title">{wh_key} 库</div>
+                    <div class="wh-stat-val">{r:.1f}%</div>
+                    <div style="font-size:11px; color:#888;">{s['u_v']:.1f}/{s['t_v']:.1f} m³</div>
+                </div>
+            """, unsafe_allow_html=True)
+
+    # 图例说明
+    st.markdown("""
+        <div class="legend-container">
+            <div class="legend-item"><div class="bin-box status-empty">层</div> 可用空位</div>
+            <div class="legend-item"><div class="bin-box status-used">层</div> 有货占用</div>
+            <div class="legend-item"><div class="bin-box status-disabled">❌</div> 不可用库位</div>
+            <div class="legend-item" style="color:#ff9800; font-weight:bold;">━ 橙色横梁</div>
+            <div class="legend-item" style="color:#3498db; font-weight:bold;">⫶ 蓝色立柱</div>
+        </div>
     """, unsafe_allow_html=True)
 
-    aisles = sorted(list(set(i['Aisle'] for i in all_locs if i['WH'] == sel_wh)))
-    sel_aisle = st.sidebar.selectbox(L["sel_aisle"], aisles)
-
-    # 导出功能
-    empty_data = [{'Loc': k, 'WH': v['WH']} for k, v in loc_map.items() if v['Status'] == '可用' and len(v['Items']) == 0]
-    if empty_data:
-        out = BytesIO(); 
-        with pd.ExcelWriter(out, engine='xlsxwriter') as w: pd.DataFrame(empty_data).to_excel(w, index=False)
-        st.sidebar.download_button(L["export_btn"], out.getvalue(), "MDC_Free_Locs.xlsx", use_container_width=True)
-
-    # --- 9. 货架显示 (修正分段逻辑) ---
-    current_cols = sorted(list(set(i['Col'] for i in all_locs if i['Aisle'] == sel_aisle)))
+    # --- 货架可视化显示逻辑 ---
+    levels = ["50","40","30","20","10","00"] if wh_sel=='A' else ["40","30","20","10","00"]
+    # 物理隔断逻辑：A库3位一隔，其他库2位一隔
+    split_size = 3 if wh_sel=='A' else 2
     
-    if sel_wh in ['A', 'B']:
-        # A和B库：三段式 (01-24, 25-48, 49+)
-        render_shelf([c for c in current_cols if int(c) <= 24], f"{L['east']} (01-24)", 3, sel_wh)
-        render_shelf([c for c in current_cols if 25 <= int(c) <= 48], f"{L['mid']} (25-48)", 3, sel_wh)
-        render_shelf([c for c in current_cols if int(c) > 48], f"{L['west']} (49+)", 3, sel_wh)
-    elif sel_wh in ['C', 'D', 'E']:
-        # C, D, E库：两段式 (01-22, 23+)
-        render_shelf([c for c in current_cols if int(c) <= 22], f"{L['east']} (01-22)", 2, sel_wh)
-        render_shelf([c for c in current_cols if int(c) > 22], f"{L['west']} (23+)", 2, sel_wh)
-    else:
-        render_shelf(current_cols, f"Corredor {sel_aisle}", 2, sel_wh)
+    aisles = sorted(list(set(v['Aisle'] for v in l_map.values() if v['WH']==wh_sel)))
+
+    for a_id in aisles:
+        st.markdown(f'<div class="aisle-title">📍 货道: {a_id}</div>', unsafe_allow_html=True)
+        # 列号逆序排列：大 -> 小 (从 72 到 01)
+        all_cols = sorted(list(set(v['Col'] for v in l_map.values() if v['Aisle']==a_id)), reverse=True)
+        
+        # 货道容器开始，左侧放置第一个封闭立柱
+        h_str = '<div class="shelf-container"><div class="pillar-tech-blue"></div>'
+        
+        # 按隔断单元(Bay)渲染
+        for i in range(0, len(all_cols), split_size):
+            bay_cols = all_cols[i : i + split_size]
+            h_str += '<div class="bay-unit">'
+            
+            # 渲染当前隔断内的所有列
+            col_html_list = ["" for _ in bay_cols]
+            
+            for l_idx, lvl in enumerate(levels):
+                for c_idx, cid in enumerate(bay_cols):
+                    f_id = f"{a_id}{cid}{lvl}"
+                    d = l_map.get(f_id)
+                    cls, sym = "status-unknown", lvl
+                    
+                    if d:
+                        if len(d['Items']) > 0: cls = "status-used"
+                        elif d['Status'] == "可用": cls = "status-empty"
+                        elif d['Status'] == "不可用": cls, sym = "status-disabled", "❌"
+                        elif d['Status'] == "通道": cls, sym = "status-aisle", "↔️"
+                        elif d['Status'] == "柱子": cls, sym = "status-pillar", "█"
+                    
+                    tip = " | ".join(d['Items']) if d and d['Items'] else (d['Status'] if d else "")
+                    col_html_list[c_idx] += f'<div class="bin-box {cls}" title="{tip}">{sym}</div>'
+                
+                # 在每一层下方插入贯穿该隔断的横梁
+                if l_idx < len(levels) - 1:
+                    for c_idx in range(len(bay_cols)):
+                        col_html_list[c_idx] += '<div class="orange-beam-row"></div>'
+
+            # 拼装各列 HTML
+            for idx, c_html in enumerate(col_html_list):
+                h_str += f'<div class="bin-column">{c_html}<div style="font-size:10px;color:#888;margin-top:2px;">{bay_cols[idx]}</div></div>'
+            
+            # 隔断结束，放置支撑立柱
+            h_str += '</div><div class="pillar-tech-blue"></div>'
+        
+        h_str += '</div>'
+        st.markdown(h_str, unsafe_allow_html=True)
 
 else:
-    st.warning("⚠️ SGF.csv 缺失或格式错误。")
+    st.error("数据加载失败。请确保 SGF.csv 文件位于 Python 脚本所在的同一目录下。")
