@@ -46,19 +46,16 @@ st.markdown("""
         border: 1px solid #eee; z-index: 2; background-color: white;
     }
     
-    /* 橙色横梁样式 */
     .orange-beam-row {
         width: 100%; height: 4px; background-color: #ff9800; 
         margin: 2px 0; box-shadow: 0 1px 2px rgba(0,0,0,0.1); z-index: 5;
     }
     
-    /* 科技蓝立柱样式 */
     .pillar-tech-blue {
         width: 0; height: 210px; border-left: 4px dotted #3498db; 
         margin: 0 10px; opacity: 0.9; align-self: flex-start; margin-top: 5px;
     }
 
-    /* 库位状态颜色 */
     .status-used { background-color: #3498db !important; color: white; border: none; }
     .status-empty { background-color: #2ecc71 !important; color: white; border: none; }
     .status-disabled { background-color: #95a5a6 !important; color: white; border: none; }
@@ -79,23 +76,15 @@ def load_data():
         return None, None
     try:
         raw_df = pd.read_csv("SGF.csv", low_memory=False)
-        # 修复 SettingWithCopyWarning：使用 .copy() 创建独立副本
         df = raw_df.iloc[:, [0, 6, 9, 11, 12, 13, 14]].copy()
-        
         df.columns = ['SKU', 'Loc', 'Qty', 'L', 'W', 'H', 'Status']
         
-        # 数据清洗与转换
         df['Loc'] = df['Loc'].astype(str).str.strip()
         df['Status'] = df['Status'].astype(str).str.strip()
         df['Qty'] = pd.to_numeric(df['Qty'], errors='coerce').fillna(0)
-        
-        for c in ['L','W','H']: 
-            df[c] = pd.to_numeric(df[c], errors='coerce').fillna(0)
-            
-        # 计算库位容积
+        for c in ['L','W','H']: df[c] = pd.to_numeric(df[c], errors='coerce').fillna(0)
         df['Vol'] = (df['L'] * df['W'] * df['H']) / 1000000
 
-        # 筛选出仓库主结构库位 (A-E 库房，非明细行)
         m_mask = (~df['Loc'].str.contains('-', na=False)) & (df['Loc'].str.startswith(('A','B','C','D','E'))) & (df['L']>0)
         master = df[m_mask].drop_duplicates('Loc')
         
@@ -117,7 +106,6 @@ def load_data():
             if r['Loc'] in l_map: 
                 l_map[r['Loc']]['Items'].append(f"{r['SKU']}:{int(r['Qty'])}")
         
-        # 统计已占用库位的容积和数量
         for k, v in l_map.items():
             if len(v['Items']) > 0 and v['Status'] == "可用": 
                 stats[v['WH']]['u_v'] += v['Vol']
@@ -134,7 +122,6 @@ l_map, wh_stats = load_data()
 if l_map:
     st.markdown('<h2 style="text-align:center; color:#1e3c72;">MDC 仓库实时监控看板</h2>', unsafe_allow_html=True)
     
-    # 顶部：全库汇总指标
     t_all = sum(s['t_v'] for s in wh_stats.values())
     u_all = sum(s['u_v'] for s in wh_stats.values())
     r_all = (u_all/t_all*100) if t_all>0 else 0
@@ -144,14 +131,45 @@ if l_map:
     st.sidebar.header("⚙️ 监控工具")
     wh_sel = st.sidebar.selectbox("切换库房视图", ['A','B','C','D','E'])
     
-    # 侧边栏：分库实时统计
     curr_data = wh_stats[wh_sel]
     st.sidebar.divider()
     st.sidebar.subheader(f"📊 {wh_sel}库 状态统计")
     st.sidebar.markdown(f"总可用库位数: **{curr_data['total_bins']}**")
     st.sidebar.markdown(f"当前已用库位: **{curr_data['used_bins']}**")
-    st.sidebar.markdown(f"当前剩余空闲: **{curr_data['total_bins'] - curr_data['used_bins']}**")
     
+    # 功能扩展：异常库位导出 (不可用但有货)
+    st.sidebar.divider()
+    st.sidebar.subheader("⚠️ 数据异常核查")
+    
+    # 筛选：状态为“不可用”且Items不为空的库位
+    error_bins = []
+    for loc, info in l_map.items():
+        if info['Status'] == "不可用" and len(info['Items']) > 0:
+            error_bins.append({
+                "库位号": loc,
+                "当前状态": info['Status'],
+                "存放货物": ", ".join(info['Items'])
+            })
+    
+    if error_bins:
+        error_df = pd.DataFrame(error_bins)
+        
+        # 导出为 Excel 格式 (使用 BytesIO)
+        output = BytesIO()
+        with pd.ExcelWriter(output, engine='xlsxwriter') as writer:
+            error_df.to_excel(writer, index=False, sheet_name='异常库位清单')
+        excel_data = output.getvalue()
+        
+        st.sidebar.warning(f"检测到 {len(error_bins)} 个异常库位 (状态禁用但有货)")
+        st.sidebar.download_button(
+            label="📥 导出异常库位 (Excel)",
+            data=excel_data,
+            file_name="MDC_System_Error_Bins.xlsx",
+            mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+        )
+    else:
+        st.sidebar.success("未检测到状态冲突库位")
+
     # 侧边栏：空库位导出
     st.sidebar.divider()
     st.sidebar.subheader("📥 报表导出")
@@ -159,31 +177,21 @@ if l_map:
     
     if empty_locs:
         csv_df = pd.DataFrame(empty_locs, columns=['Empty_Location_ID'])
-        csv_bytes = csv_df.to_csv(index=False).encode('utf-8-sig')
         st.sidebar.download_button(
             label=f"导出 {wh_sel}库 空库位清单",
-            data=csv_bytes,
+            data=csv_df.to_csv(index=False).encode('utf-8-sig'),
             file_name=f"MDC_{wh_sel}_Empty_Locs.csv",
             mime='text/csv'
         )
-    else:
-        st.sidebar.warning(f"{wh_sel}库暂时没有空闲库位")
 
-    # 主页：分库容积明细卡片
+    # 主页渲染
     cols_stats = st.columns(5)
     for i, wh_key in enumerate(['A', 'B', 'C', 'D', 'E']):
         s = wh_stats[wh_key]
         r = (s['u_v']/s['t_v']*100) if s['t_v']>0 else 0
         with cols_stats[i]:
-            st.markdown(f"""
-                <div class="wh-stat-card">
-                    <div class="wh-stat-title">{wh_key} 库</div>
-                    <div class="wh-stat-val">{r:.1f}%</div>
-                    <div style="font-size:11px; color:#888;">{s['u_v']:.1f}/{s['t_v']:.1f} m³</div>
-                </div>
-            """, unsafe_allow_html=True)
+            st.markdown(f'<div class="wh-stat-card"><div class="wh-stat-title">{wh_key} 库</div><div class="wh-stat-val">{r:.1f}%</div><div style="font-size:11px; color:#888;">{s["u_v"]:.1f}/{s["t_v"]:.1f} m³</div></div>', unsafe_allow_html=True)
 
-    # 图例说明
     st.markdown("""
         <div class="legend-container">
             <div class="legend-item"><div class="bin-box status-empty">层</div> 可用空位</div>
@@ -194,59 +202,34 @@ if l_map:
         </div>
     """, unsafe_allow_html=True)
 
-    # --- 货架可视化显示逻辑 ---
     levels = ["50","40","30","20","10","00"] if wh_sel=='A' else ["40","30","20","10","00"]
-    # 物理隔断逻辑：A库3位一隔，其他库2位一隔
     split_size = 3 if wh_sel=='A' else 2
-    
     aisles = sorted(list(set(v['Aisle'] for v in l_map.values() if v['WH']==wh_sel)))
 
     for a_id in aisles:
         st.markdown(f'<div class="aisle-title">📍 货道: {a_id}</div>', unsafe_allow_html=True)
-        # 列号逆序排列：大 -> 小 (从 72 到 01)
         all_cols = sorted(list(set(v['Col'] for v in l_map.values() if v['Aisle']==a_id)), reverse=True)
-        
-        # 货道容器开始，左侧放置第一个封闭立柱
         h_str = '<div class="shelf-container"><div class="pillar-tech-blue"></div>'
-        
-        # 按隔断单元(Bay)渲染
         for i in range(0, len(all_cols), split_size):
             bay_cols = all_cols[i : i + split_size]
             h_str += '<div class="bay-unit">'
-            
-            # 渲染当前隔断内的所有列
             col_html_list = ["" for _ in bay_cols]
-            
             for l_idx, lvl in enumerate(levels):
                 for c_idx, cid in enumerate(bay_cols):
                     f_id = f"{a_id}{cid}{lvl}"
                     d = l_map.get(f_id)
                     cls, sym = "status-unknown", lvl
-                    
                     if d:
                         if len(d['Items']) > 0: cls = "status-used"
                         elif d['Status'] == "可用": cls = "status-empty"
                         elif d['Status'] == "不可用": cls, sym = "status-disabled", "❌"
                         elif d['Status'] == "通道": cls, sym = "status-aisle", "↔️"
                         elif d['Status'] == "柱子": cls, sym = "status-pillar", "█"
-                    
                     tip = " | ".join(d['Items']) if d and d['Items'] else (d['Status'] if d else "")
                     col_html_list[c_idx] += f'<div class="bin-box {cls}" title="{tip}">{sym}</div>'
-                
-                # 在每一层下方插入贯穿该隔断的横梁
                 if l_idx < len(levels) - 1:
-                    for c_idx in range(len(bay_cols)):
-                        col_html_list[c_idx] += '<div class="orange-beam-row"></div>'
-
-            # 拼装各列 HTML
+                    for c_idx in range(len(bay_cols)): col_html_list[c_idx] += '<div class="orange-beam-row"></div>'
             for idx, c_html in enumerate(col_html_list):
                 h_str += f'<div class="bin-column">{c_html}<div style="font-size:10px;color:#888;margin-top:2px;">{bay_cols[idx]}</div></div>'
-            
-            # 隔断结束，放置支撑立柱
             h_str += '</div><div class="pillar-tech-blue"></div>'
-        
-        h_str += '</div>'
-        st.markdown(h_str, unsafe_allow_html=True)
-
-else:
-    st.error("数据加载失败。请确保 SGF.csv 文件位于 Python 脚本所在的同一目录下。")
+        st.markdown(h_str + '</div>', unsafe_allow_html=True)
