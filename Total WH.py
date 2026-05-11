@@ -37,10 +37,12 @@ st.markdown("""
         border-radius: 10px; border: 1px solid #eee; margin-bottom: 30px;
     }
     .bay-unit { display: flex; flex-direction: row; align-items: flex-start; }
-    .bin-column { display: flex; flex-direction: column; align-items: center; width: 42px; flex-shrink: 0; }
+    
+    /* 改动说明2：调整尺寸，将宽度从42px微调为38px以适配6个库的显示 */
+    .bin-column { display: flex; flex-direction: column; align-items: center; width: 38px; flex-shrink: 0; }
     
     .bin-box {
-        width: 36px; height: 30px; margin: 0px 0;
+        width: 32px; height: 30px; margin: 0px 0; /* 宽度微调 */
         display: flex; align-items: center; justify-content: center;
         border-radius: 2px; font-size: 10px; font-weight: bold;
         border: 1px solid #eee; z-index: 2; background-color: white;
@@ -85,10 +87,12 @@ def load_data():
         for c in ['L','W','H']: df[c] = pd.to_numeric(df[c], errors='coerce').fillna(0)
         df['Vol'] = (df['L'] * df['W'] * df['H']) / 1000000
 
-        m_mask = (~df['Loc'].str.contains('-', na=False)) & (df['Loc'].str.startswith(('A','B','C','D','E'))) & (df['L']>0)
+        # 改动说明1：加入 'G' 库到筛选条件
+        m_mask = (~df['Loc'].str.contains('-', na=False)) & (df['Loc'].str.startswith(('A','B','C','D','E','G'))) & (df['L']>0)
         master = df[m_mask].drop_duplicates('Loc')
         
-        l_map, stats = {}, {wh: {'t_v':0.0, 'u_v':0.0, 'total_bins':0, 'used_bins':0} for wh in 'ABCDE'}
+        # 改动说明1：统计字典加入 'G'
+        l_map, stats = {}, {wh: {'t_v':0.0, 'u_v':0.0, 'total_bins':0, 'used_bins':0} for wh in 'ABCDEG'}
         
         for _, r in master.iterrows():
             wh = r['Loc'][0].upper()
@@ -100,7 +104,6 @@ def load_data():
                 stats[wh]['t_v'] += r['Vol']
                 stats[wh]['total_bins'] += 1
         
-        # 填充实时库存货物
         inv = df[df['Qty'] > 0]
         for _, r in inv.iterrows():
             if r['Loc'] in l_map: 
@@ -129,7 +132,7 @@ if l_map:
 
     # --- 侧边栏功能区 ---
     st.sidebar.header("⚙️ 监控工具")
-    wh_sel = st.sidebar.selectbox("切换库房视图", ['A','B','C','D','E'])
+    wh_sel = st.sidebar.selectbox("切换库房视图", ['A','B','C','D','E','G']) # 改动1：增加G库
     
     curr_data = wh_stats[wh_sel]
     st.sidebar.divider()
@@ -137,36 +140,24 @@ if l_map:
     st.sidebar.markdown(f"总可用库位数: **{curr_data['total_bins']}**")
     st.sidebar.markdown(f"当前已用库位: **{curr_data['used_bins']}**")
     
-    # 功能扩展：异常库位导出 (不可用但有货)
+    # 异常库位导出
     st.sidebar.divider()
     st.sidebar.subheader("⚠️ 数据异常核查")
-    
-    # 筛选：状态为“不可用”且Items不为空的库位
     error_bins = []
     for loc, info in l_map.items():
         if info['Status'] == "不可用" and len(info['Items']) > 0:
             error_bins.append({
-                "库位号": loc,
-                "当前状态": info['Status'],
-                "存放货物": ", ".join(info['Items'])
+                "库位号": loc, "当前状态": info['Status'], "存放货物": ", ".join(info['Items'])
             })
     
     if error_bins:
         error_df = pd.DataFrame(error_bins)
-        
-        # 导出为 Excel 格式 (使用 BytesIO)
         output = BytesIO()
         with pd.ExcelWriter(output, engine='xlsxwriter') as writer:
             error_df.to_excel(writer, index=False, sheet_name='异常库位清单')
         excel_data = output.getvalue()
-        
-        st.sidebar.warning(f"检测到 {len(error_bins)} 个异常库位 (状态禁用但有货)")
-        st.sidebar.download_button(
-            label="📥 导出异常库位 (Excel)",
-            data=excel_data,
-            file_name="MDC_System_Error_Bins.xlsx",
-            mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
-        )
+        st.sidebar.warning(f"检测到 {len(error_bins)} 个异常库位")
+        st.sidebar.download_button(label="📥 导出异常库位 (Excel)", data=excel_data, file_name="MDC_Error_Bins.xlsx", mime="application/vnd.ms-excel")
     else:
         st.sidebar.success("未检测到状态冲突库位")
 
@@ -174,19 +165,15 @@ if l_map:
     st.sidebar.divider()
     st.sidebar.subheader("📥 报表导出")
     empty_locs = [k for k, v in l_map.items() if v['WH'] == wh_sel and v['Status'] == "可用" and len(v['Items']) == 0]
-    
     if empty_locs:
         csv_df = pd.DataFrame(empty_locs, columns=['Empty_Location_ID'])
-        st.sidebar.download_button(
-            label=f"导出 {wh_sel}库 空库位清单",
-            data=csv_df.to_csv(index=False).encode('utf-8-sig'),
-            file_name=f"MDC_{wh_sel}_Empty_Locs.csv",
-            mime='text/csv'
-        )
+        st.sidebar.download_button(label=f"导出 {wh_sel}库 空库位清单", data=csv_df.to_csv(index=False).encode('utf-8-sig'), file_name=f"MDC_{wh_sel}_Empty_Locs.csv", mime='text/csv')
 
     # 主页渲染
-    cols_stats = st.columns(5)
-    for i, wh_key in enumerate(['A', 'B', 'C', 'D', 'E']):
+    # 改动2：改为 st.columns(6) 适配新增的G库
+    cols_stats = st.columns(6)
+    wh_keys = ['A', 'B', 'C', 'D', 'E', 'G']
+    for i, wh_key in enumerate(wh_keys):
         s = wh_stats[wh_key]
         r = (s['u_v']/s['t_v']*100) if s['t_v']>0 else 0
         with cols_stats[i]:
@@ -202,6 +189,7 @@ if l_map:
         </div>
     """, unsafe_allow_html=True)
 
+    # 改动1：G库逻辑同B,C,D,E（5层，2个位置一个隔断）
     levels = ["50","40","30","20","10","00"] if wh_sel=='A' else ["40","30","20","10","00"]
     split_size = 3 if wh_sel=='A' else 2
     aisles = sorted(list(set(v['Aisle'] for v in l_map.values() if v['WH']==wh_sel)))
